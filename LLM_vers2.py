@@ -1,43 +1,44 @@
 import numpy as np
-from transformers import pipeline
-from sentence_transformers import SentenceTransformer
-import json
+from openai import OpenAI
+from dotenv import load_dotenv
 import os
+import json
 from FAISS_integrate import VectorDB
 
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
+
 class CocktailAssistant:
-    def __init__(self, llm_model="distilgpt2", vector_db_path="faiss_index", 
-                 metadata_path="faiss_metadata.pkl", json_path="processed_drinks.json",
-                 user_preferences_path="user_preferences.json"):
+    def __init__(self, vector_db_path="faiss_index", metadata_path="faiss_metadata.pkl", 
+                 json_path="processed_drinks.json", user_preferences_path="user_preferences.json",
+                 openai_api_key=openai_api_key):
         """
-        Ініціалізація асистента для коктейлів.
-        
-        :param llm_model: Назва моделі LLM (наприклад, distilgpt2)
-        :param vector_db_path: Шлях до FAISS індексу
-        :param metadata_path: Шлях до метаданих FAISS
-        :param json_path: Шлях до обробленого JSON з даними про напої
-        :param user_preferences_path: Шлях до файлу з вподобаннями користувача
+        Initializing the Cocktail Assistant with OpenAI.
+
+        :param vector_db_path: Path to the FAISS index
+        :param metadata_path: Path to the FAISS metadata
+        :param json_path: Path to the processed JSON with drink data
+        :param user_preferences_path: Path to the user preferences file
+        :param openai_api_key: OpenAI API key
         """
-        # Ініціалізація LLM
-        self.llm = pipeline("text-generation", model=llm_model, max_length=200, truncation=True)
-        
-        # Ініціалізація векторної бази даних
         self.vector_db = VectorDB(index_path=vector_db_path, metadata_path=metadata_path)
         self.vector_db.load_index()
-        
-        # Завантаження даних з JSON
         self.drinks_data = self.load_json(json_path)
 
-        # Ініціалізація вподобань користувача
         self.user_preferences_path = user_preferences_path
         self.user_preferences = self.load_user_preferences()
 
+        if openai_api_key:
+            self.llm = OpenAI(api_key=openai_api_key)
+        else:
+            raise ValueError("OpenAI API key is required for LLM initialization.")
+
     def load_json(self, json_path):
         """
-        Завантаження оброблених даних з JSON файлу.
-        
-        :param json_path: Шлях до JSON файлу з обробленими даними
-        :return: Список словників з інформацією про напої
+        Load processed data from a JSON file.
+
+        :param json_path: Path to the JSON file with processed data
+        :return: List of dictionaries with information about drinks
         """
         if not os.path.exists(json_path):
             raise FileNotFoundError(f"JSON file not found at path: {json_path}")
@@ -49,9 +50,9 @@ class CocktailAssistant:
 
     def load_user_preferences(self):
         """
-        Завантаження вподобань користувача з JSON файлу.
-        
-        :return: Словник із вподобаннями користувача
+        Loading user preferences with JSON file.
+
+        :return: Dictionary with user preferences
         """
         if os.path.exists(self.user_preferences_path):
             with open(self.user_preferences_path, "r", encoding="utf-8") as f:
@@ -64,7 +65,7 @@ class CocktailAssistant:
 
     def save_user_preferences(self):
         """
-        Збереження вподобань користувача до JSON файлу.
+        Saving user preferences to a JSON file.
         """
         with open(self.user_preferences_path, "w", encoding="utf-8") as f:
             json.dump(self.user_preferences, f, indent=4)
@@ -72,9 +73,9 @@ class CocktailAssistant:
 
     def detect_user_preferences(self, query):
         """
-        Виявлення вподобань користувача з тексту запиту.
-        
-        :param query: Текст запиту користувача
+        Detect user preferences from query text.
+
+        :param query: User query text
         """
         query_lower = query.lower()
         if "my favorite ingredient" in query_lower or "i like" in query_lower:
@@ -88,61 +89,43 @@ class CocktailAssistant:
 
     def get_cocktails_by_ingredient(self, ingredient, limit=5):
         """
-        Пошук коктейлів за інгредієнтом.
-        
-        :param ingredient: Назва інгредієнта
-        :param limit: Максимальна кількість результатів
-        :return: Список коктейлів
+        Search for cocktails by ingredient.
+
+        :param ingredient: Ingredient name
+        :param limit: Maximum number of results
+        :return: List of cocktails
         """
         ingredient = ingredient.lower()
         filtered_drinks = [drink for drink in self.drinks_data 
                           if any(ingredient in ing["ingredient"].lower() 
                                 for ing in drink["combined_ingredients"])]
-        print(f"Filtered drinks with ingredient {ingredient}: {[drink['name'] for drink in filtered_drinks]}")
         return filtered_drinks[:limit]
 
     def get_cocktails_by_alcoholic(self, is_alcoholic, ingredient=None, limit=5):
-        """
-        Пошук коктейлів за алкогольністю та інгредієнтом.
-        
-        :param is_alcoholic: True для алкогольних, False для безалкогольних
-        :param ingredient: Назва інгредієнта (опціонально)
-        :param limit: Максимальна кількість результатів
-        :return: Список коктейлів
-        """
         alcoholic_status = "alcoholic" if is_alcoholic else "non alcoholic"
         filtered_drinks = [drink for drink in self.drinks_data 
-                          if drink["alcoholic"].lower() == alcoholic_status]
-        print(f"Filtered drinks (alcoholic={is_alcoholic}): {[drink['name'] for drink in filtered_drinks]}")
+                        if drink["alcoholic"].lower() == alcoholic_status]
         
         if ingredient:
             ingredient = ingredient.lower()
             filtered_drinks = [drink for drink in filtered_drinks 
-                              if any(ingredient in ing["ingredient"].lower() 
+                            if any(ingredient in ing["ingredient"].lower() 
                                     for ing in drink["combined_ingredients"])]
-        print(f"Filtered drinks with ingredient {ingredient}: {[drink['name'] for drink in filtered_drinks]}")
         return filtered_drinks[:limit]
-
+    
     def recommend_similar_cocktail(self, cocktail_name, k=5):
         """
-        Рекомендація схожих коктейлів на основі назви коктейлю.
-        
-        :param cocktail_name: Назва коктейлю
-        :param k: Кількість рекомендацій
-        :return: Список схожих коктейлів
+        Recommend similar cocktails based on cocktail name.
+
+        :param cocktail_name: Cocktail name
+        :param k: Number of recommendations
+        :return: List of similar cocktails
         """
         query = cocktail_name.lower()
         similar_drinks = self.vector_db.search_similar_drinks(query, k=k)
-        print(f"Found similar cocktails for {cocktail_name}: {[drink['name'] for drink in similar_drinks]}")
         return similar_drinks
 
     def recommend_by_preferences(self, k=5):
-        """
-        Рекомендація коктейлів на основі вподобань користувача.
-        
-        :param k: Кількість рекомендацій
-        :return: Список коктейлів
-        """
         print(f"Favorite ingredients: {self.user_preferences['favorite_ingredients']}")
         if not self.user_preferences["favorite_ingredients"]:
             return []
@@ -154,15 +137,14 @@ class CocktailAssistant:
 
     def generate_answer(self, query):
         """
-        Генерація відповіді на запит користувача.
-        
-        :param query: Текст запиту
-        :return: Відповідь
+        Generate a response to a user query.
+
+        :param query: Query text
+        :return: Response
         """
         self.detect_user_preferences(query)
         query_lower = query.lower()
 
-        # Пошук за інгредієнтами
         if "cocktails containing" in query_lower:
             for drink in self.drinks_data:
                 for ing in drink["combined_ingredients"]:
@@ -177,7 +159,6 @@ class CocktailAssistant:
                         else:
                             return f"No cocktails found containing {ingredient}."
 
-        # Пошук безалкогольних коктейлів
         elif "non-alcoholic cocktails" in query_lower:
             for drink in self.drinks_data:
                 for ing in drink["combined_ingredients"]:
@@ -192,14 +173,12 @@ class CocktailAssistant:
                         else:
                             return f"No non-alcoholic cocktails found containing {ingredient}."
 
-        # Улюблені інгредієнти
         elif "my favourite ingredients" in query_lower:
             if self.user_preferences["favorite_ingredients"]:
                 return f"Your favorite ingredients are: {', '.join(self.user_preferences['favorite_ingredients'])}"
             else:
                 return "You haven't shared your favorite ingredients yet."
 
-        # Рекомендація за вподобаннями
         elif "recommend" in query_lower and "my favourite ingredients" in query_lower:
             cocktails = self.recommend_by_preferences()
             if cocktails:
@@ -210,7 +189,6 @@ class CocktailAssistant:
             else:
                 return "No recommendations found. Please share your favorite ingredients first."
 
-        # Рекомендація схожих коктейлів
         elif "recommend" in query_lower and "similar to" in query_lower:
             cocktail_name = query_lower.split("similar to")[-1].strip()
             cocktails = self.recommend_similar_cocktail(cocktail_name)
@@ -222,7 +200,6 @@ class CocktailAssistant:
             else:
                 return f"No similar cocktails found for {cocktail_name}."
 
-        # Використання RAG для генерації відповідей на інші запити
         else:
             similar_drinks = self.vector_db.search_similar_drinks(query, k=3)
             context = ""
@@ -233,20 +210,25 @@ class CocktailAssistant:
                     context += f"- {drink['name']} (Ingredients: {ingredients}, Instructions: {drink['instructions']})\n"
 
             prompt = f"User query: {query}\n\nContext: {context}\nAssistant: Based on your query, here are some recommendations:\n{context}\nIf you need more details, feel free to ask!"
-            print(f"Prompt for LLM: {prompt}")
 
-            llm_response = self.llm(prompt, max_length=400, num_return_sequences=1, do_sample=False)[0]["generated_text"]
-            print(f"Raw LLM response: {llm_response}")
-            llm_response = "\n".join(line for line in llm_response.split("\n") if not line.strip().isdigit())
-            print(f"Cleaned LLM response: {llm_response}")
+            response = self.llm.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a cocktail advisor assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=300,
+                temperature=0.7
+            )
+            llm_response = response.choices[0].message.content
             return llm_response
 
     def process_query(self, query):
         """
-        Обробка запиту користувача та повернення відповіді.
-        
-        :param query: Текст запиту
-        :return: Відповідь
+        Processing a user request and returning a response.
+
+        :param query: Query text
+        :return: Response
         """
         try:
             return self.generate_answer(query)

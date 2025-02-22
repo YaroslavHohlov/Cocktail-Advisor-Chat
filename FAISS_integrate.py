@@ -66,7 +66,7 @@ class VectorDB:
         self.index = faiss.IndexFlatL2(self.dimension)
         self.index.add(embeddings)
 
-        print(f"FAISS індекс створено. Кількість записів: {self.index.ntotal}")
+        print(f"FAISS index created. Number of records: {self.index.ntotal}")
 
         self.save_index()
 
@@ -100,7 +100,7 @@ class VectorDB:
         :return: List of similar drinks
         """
         if self.index is None:
-            raise ValueError("FAISS індекс не створено або не завантажено.")
+            raise ValueError("FAISS index not created or loaded.")
 
         query_embedding = self.model.encode([query], show_progress_bar=False)
         query_embedding = np.array(query_embedding).astype("float32")
@@ -126,7 +126,7 @@ if __name__ == "__main__":
         vector_db.create_index(drinks_data)
         query = "cocktail with gin and lemon juice"
         similar_drinks = vector_db.search_similar_drinks(query, k=5)
-        print(f"Схожі напої для запиту '{query}':")
+        print(f"Similar drinks for request '{query}':")
         for drink in similar_drinks:
             print(f"- {drink['name']} (similarity score: {drink['similarity_score']})")
 
